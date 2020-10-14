@@ -1,0 +1,6 @@
+**/exploration/*.ipynb
+**/data
+**/archive
+**/.ipynb_checkpoints
+**/chipseq_wig
+**/plots
