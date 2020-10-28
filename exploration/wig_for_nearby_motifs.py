@@ -20,6 +20,7 @@ ctcf["chr_num"] = ctcf["chr_num"].astype(int, errors="ignore")
 
 ctcf = ctcf[ctcf["chip_seq_signal_max"] > 10]
 ctcf = ctcf[(ctcf["dist_prev"] <= 150) | (ctcf["dist_foll"] <=150)].sort_values(by=["chr_num", "startMotif"], axis=0)
+dict_motifs = ctcf
 cluster_motifs = ctcf.drop(["Unnamed: 0", "score", "peakLenth", "positionalScore", "probabilityAffinityScore", "SarusAffinityScore", "peakMaximumHeight", "peakHeightDelta", "motifSignalHeight", "numberOfTFHitsPerPeak", "numberOfOverlappingMotifs", "numberOverlappingTFs", "rankAmongOverlappingMotifs", "chipseq_peak", "peak_num"], axis=1)
 
 
@@ -33,8 +34,12 @@ for i in range(len(cluster_motifs)):
         print("finished {} motifs in {} seconds".format(i, time()-start_time))
     start_i = cluster_motifs.iloc[i]["start_interval"]
     end_i = cluster_motifs.iloc[i]["stop_interval"]
+    chr_num = cluster_motifs.iloc[i]["chr_num"]
     cluster_motifs["interval_cnt"].iloc[i] = len(
-        cluster_motifs[(cluster_motifs["startMotif"] - 150 > start_i) & (cluster_motifs["endMotif"] + 150 < end_i)])
+        cluster_motifs[(
+            cluster_motifs["chr_num"] == chr_num) & (
+            cluster_motifs["startMotif"] - 150 > start_i) & (
+            cluster_motifs["endMotif"] + 150 < end_i)])
 print("finished clustering motifs in {} seconds".format(time()-start_time))
 
 rel_intervals = cluster_motifs[cluster_motifs["interval_cnt"] > 1].drop_duplicates(subset=["start_interval"])[["start_interval", "stop_interval", "chr_num"]]
@@ -56,13 +61,18 @@ interval_motifs_dict = {}
 for i in range(len(rel_intervals)):
     if i%1000==0:
         print("finished {} intervals in {} seconds".format(i, time()-start_time))
+    chr_num = rel_intervals.iloc[i]["chr_num"]
     start_i = rel_intervals.iloc[i]["start_interval"]
     end_i = rel_intervals.iloc[i]["stop_interval"]
-    interval_motifs = cluster_motifs[(cluster_motifs["startMotif"] - 150 > start_i) & (cluster_motifs["endMotif"] + 150 < end_i)]
+    interval_motifs = dict_motifs[(
+        dict_motifs["chr_num"] == chr_num) & (
+        dict_motifs["startMotif"] - 150 > start_i) & (
+        dict_motifs["endMotif"] + 150 < end_i)]
     rel_intervals["motifs"].iloc[i] = list(interval_motifs["motifCoreMiddle"])
     rel_intervals["motif_signals"].iloc[i] = list(interval_motifs["chip_seq_signal_max"])
     rel_intervals["motifs_rel_location"].iloc[i] = list(interval_motifs["motifCoreMiddle"]) - start_i
-    interval_motifs_dict[start_i] = interval_motifs
+    interval_motifs_dict[start_i] = interval_motifs.drop(
+        ["chipseq_peak", "peakDist", "startMotif", "endMotif", "signal_value_adjusted", "chip_seq_signal_max"] ,axis=1)
 print("finished mapping intervals to motifs in {} seconds".format(time()-start_time))
 
 
@@ -71,6 +81,7 @@ intervals_chr = rel_intervals
 intervals_with_wig = []
 
 CHROMOSOMES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, "X", "Y"]
+
 
 
 for chr_num in CHROMOSOMES:

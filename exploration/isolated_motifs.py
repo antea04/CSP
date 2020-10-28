@@ -24,6 +24,9 @@ isolated_labels = isolated_motifs["chip_seq_signal_max"]
 isolated_motifs = isolated_motifs.drop(["chipseq_peak", "peakDist", "startMotif", "endMotif", "signal_value_adjusted", "chip_seq_signal_max"] ,axis=1)
 
 
+print(isolated_motifs.columns())
+
+
 class Net(nn.Module):
 
     def __init__(self):
