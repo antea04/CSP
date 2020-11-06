@@ -49,16 +49,16 @@ net = Net()
 print(net)
 
 
-with open("./data/train_input_{}.pkl".format(tf_name), "rb") as f:
+with open("./exploration/data/train_input_{}.pkl".format(tf_name), "rb") as f:
     train_input = pickle.load(f)
 
-with open("./data/train_label_{}.pkl".format(tf_name), "rb") as f:
+with open("./exploration/data/train_label_{}.pkl".format(tf_name), "rb") as f:
     train_label = pickle.load(f)
 
-with open("./data/test_input_{}.pkl".format(tf_name), "rb") as f:
+with open("./exploration/data/test_input_{}.pkl".format(tf_name), "rb") as f:
     test_input = pickle.load(f)
 
-with open("./data/test_label_{}.pkl".format(tf_name), "rb") as f:
+with open("./exploration/data/test_label_{}.pkl".format(tf_name), "rb") as f:
     test_label = pickle.load(f)    
     
 numpy_input = np.array(train_input).astype(float)

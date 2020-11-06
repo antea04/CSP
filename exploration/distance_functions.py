@@ -77,33 +77,62 @@ model.float()
 model.eval()
 
 steps = ["step_{}".format(i) for i in range(0, 510, 10)]
-x_axis = range(0, 510, 10)
+x_axis = np.array(range(0, 510, 10))
 
-
-dist1 = []
-dist2 = []
-dist3 = []
-dist4 = []
-dist5 = []
-baseline = []
 
 start_time = time()
 ##another try: big peak (combining signals) with peak relative to different signal positions
 
-print("DISTANCE METRIC: DISTANCE OF FUNCTIONS (SQUARE ROOT OF ABSOLUTE DISTANCE SQUARED AND SUMMED - NORMALIZED")
-print("NORMALIZATION: SCALING FACTOR : 100/MAX(ACTUAL_SIGNAL")
-def calc_distance(interval, y): 
-    if normalization:
-        #scaling_factor = 100/max(np.array(interval[steps]))
-        return np.sum(abs(np.array(interval[steps]) - y))/np.sum(interval[steps])
-    else:
-        scaling_factor = 1
-    return np.sqrt(np.sum(np.power(abs(np.array(interval[steps])*scaling_factor - y*scaling_factor), 2)))
+print("DISTANCE METRIC: average fraction of deviation (incl. sign)")
+print("NORMALIZATION: over height (by taking fraction) and over length (by averaging)")
+
+def calc_dist(true_signal, pred_signal): 
+    try:
+        assert len(true_signal) == len(pred_signal)
+    except AssertionError as e:
+        print(true_signal)
+        print(pred_signal)
+        e.args += (len(true_signal), len(pred_signal))
+        raise
+        
+    true_signal = np.array(true_signal)
+    norm_term = np.where(true_signal==0, 0.1, true_signal)
+    return np.mean(np.true_divide(np.array(pred_signal-true_signal), norm_term))
+
+def make_signal_dict(interval, i, pred_signal, motifs_middle_location, motif_loc):
+    closest_ten = np.round(motif_loc, -1)
+    min_axis = max(0, closest_ten - 150)
+    max_axis = min(500, closest_ten + 150)
+    height = pred_signal[i]
+    signal_dict = {
+        "interval_start": interval["start_interval"],
+        "motif_abs_loc": motifs_middle_location[i],
+        "motif_rel_loc": motif_loc,
+        "total_peaks": len(pred_signal),
+        "rank_peak": len([k for k in pred_signal if k > height]) + 1,
+        "peak_frac": np.round(height/np.max(pred_signal), 2),
+        "total_signal_frac": np.round(height/np.sum(pred_signal), 2),
+        "height": height,
+        "signal_axis": np.array(range(min_axis, max_axis + 5, 10))
+    }
+    return signal_dict
     
+    
+reduced_signal_list = []
+reduced_signal_dist = []
+
+added_signal_list = []
+added_signal_dist = []
+
+promoted_signal_list = []
+promoted_signal_dist = []
+
+
+total_signal_dicts = []
+
 for j, interval in intervals.iterrows():
+    signal_dicts_list = []
     
-    if j%1000 !=0:
-        continue
     
     motifs_middle_location = [int(i) for i in interval["motifs"].strip("[]").split(", ")]
     motif_signal = [float(i) for i in interval["motif_signals"].strip("[]").split(", ")]
@@ -113,85 +142,100 @@ for j, interval in intervals.iterrows():
         ctcf_chr = ctcf[ctcf["chr_num"] == interval["chr_num"]]
     else:
         ctcf_chr = ctcf[ctcf["chr_num"] == int(interval["chr_num"])]
+        
     rel_motifs = ctcf_chr[(ctcf_chr["motifCoreMiddle"].isin(motifs_middle_location))]
     rel_motifs = rel_motifs.drop(["chipseq_peak", "peakDist", "startMotif", "endMotif", "signal_value_adjusted", "chip_seq_signal_max"] ,axis=1)
     pred_signal = model(make_torch(rel_motifs)).detach().numpy()
     
+    assert len(pred_signal) == len(motifs_middle_location), "Motif list length does not match up"
+
     
-    cum_signal = sum(pred_signal)
-    try:
-        weighted_cen_pos = int(
-            np.dot(
-                np.squeeze(np.array([(signal/cum_signal) for signal in pred_signal])), 
-                np.array(motifs_rel_location)))
-    except:
-        print("predicted signals and locations do not match")
-        print(interval)
-        print(pred_signal)
-        print(rel_motifs)
-        print(motifs_rel_location)
-        continue
+    max_scale = max(max(pred_signal), max(interval[steps]))
+    signal_dict = {}
     
-    added_signals = []
-    
-    max_y = 0
-    highest_peak = 0
-    max_scale = max(cum_signal, max(interval[steps])) + 10
-    plt.figure()
-    plt.plot(x_axis, np.array(interval[steps]), label = "chipseq")
     for i in range(len(motifs_middle_location)):
+        
         motif_value = pred_signal[i]
         motif_loc = motifs_rel_location[i]
-        bates = bates_f(np.array(x_axis), motif_value, motif_loc - 700, motif_loc + 700)
+        
+        signal_dict = make_signal_dict(interval, i, pred_signal, motifs_middle_location, motif_loc)
+        
+        bates = bates_f(x_axis, motif_value, motif_loc - 700, motif_loc + 700)
         y = bates*(motif_value/max(bates))
-        plt.plot(x_axis, y, label="peak_{}".format(i))
-        if max(y) > max_y:
-            max_y = max(y)
-            highest_peak = y
-        added_signals.append(y)
-    plt.legend()
-    plt.ylim((0, max_scale))
-    plt.savefig("./plots/{}_all_peaks.png".format(j))
+        
+        signal_dict["raw_pred_signal"] = y
+        signal_dicts_list.append(signal_dict)
+        
+    
+    reduced_signal = np.sum(np.array(
+        [signal_dict["raw_pred_signal"]*signal_dict["total_signal_frac"] for signal_dict in signal_dicts_list]), axis=0)
+    reduced_signal_list.append(reduced_signal)
+    reduced_signal_dist.append(calc_dist(interval[steps], reduced_signal))
+    
+    added_signal = np.sum(np.array([signal_dict["raw_pred_signal"] for signal_dict in signal_dicts_list]), axis=0)
+    added_signal_list.append(added_signal)
+    added_signal_dist.append(calc_dist(interval[steps], added_signal))
+    
+    promoted_signal = np.sum(np.array(
+        [signal_dict["raw_pred_signal"]*(2-signal_dict["total_signal_frac"]) for signal_dict in signal_dicts_list]), axis=0)
+    promoted_signal_list.append(promoted_signal)
+    promoted_signal_dist.append(calc_dist(interval[steps], promoted_signal))
+    
+    
 
-    dist1.append(calc_distance(interval, highest_peak))
-    dist2.append(calc_distance(interval, np.sum(added_signals, 0)))
-    dist3.append(calc_distance(interval, np.amax(added_signals, 0)))
-    comb_bates = bates_f(np.array(x_axis), max_y, weighted_cen_pos - 700, weighted_cen_pos + 700)
-    dist4.append(calc_distance(interval, comb_bates*(cum_signal/max(bates))))
+    for signal_dict in signal_dicts_list:
+        
+        signal_axis = signal_dict["signal_axis"] 
+        
+        steps_indices = ["step_{}".format(k) for k in signal_axis]
+        true_signal = interval[steps_indices]
+        
+        min_idx = np.where(x_axis == min(signal_axis))[0][0]
+        max_idx = np.where(x_axis == max(signal_axis))[0][0]
+        
+        signal_dict["true_signal"] = np.array(true_signal)
+        
+        bates_2 = bates_f(
+            signal_axis, signal_dict["height"], signal_dict["motif_rel_loc"] - 700, signal_dict["motif_rel_loc"] + 700)
+        
+        signal_dict["raw_pred_nbhd"] = bates_2*(signal_dict["height"]/max(bates_2))
+        
+        signal_dict["reduced_signal"] = reduced_signal[min_idx: max_idx + 1]
+        signal_dict["reduced_signal_dist"] = calc_dist(true_signal, reduced_signal[min_idx: max_idx + 1])
+        
+        signal_dict["added_signal"] = added_signal[min_idx: max_idx + 1]
+        signal_dict["added_signal_dist"] = calc_dist(true_signal, added_signal[min_idx: max_idx + 1])
+        
+        signal_dict["promoted_signal"] = promoted_signal[min_idx: max_idx + 1]
+        signal_dict["promoted_signal_dist"] = calc_dist(true_signal, promoted_signal[min_idx: max_idx + 1])
     
-    dist5.append(calc_distance(interval, np.mean(added_signals, 0)*(max_y/max(np.mean(added_signals, 0)))))
-    baseline.append(calc_distance(interval, np.zeros(np.array(interval[steps]).shape)))
-                 
-    
-    if j%1000 ==0:
-        max_scale = max(cum_signal, max(interval[steps])) + 10
+    if j%1000 == 0:
         print("{:.2f} seconds for {} intervals".format(time()-start_time, j))
+        print(pd.DataFrame(signal_dicts_list))
         
-        plt.figure()
-        plt.plot(x_axis, np.array(interval[steps]), label = "chipseq")
-        plt.plot(x_axis, highest_peak, label = "just strongest signal")
-        plt.ylim((0, max_scale))
-        plt.legend()
-        plt.savefig("./plots/{}_just_strongest_signal.png".format(j))
-        
-        plt.figure()
-        plt.plot(x_axis, np.array(interval[steps]), label = "chipseq")
-        plt.plot(x_axis, np.sum(added_signals, 0), label = "all peaks added")
-        plt.ylim((0, max_scale))
+     
+    total_signal_dicts.extend(signal_dicts_list)
     
-            
-perc = [0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7,0.75, 0.8, 0.9]
-print("### max peak ###")
-print(pd.DataFrame(dist1).describe(percentiles = perc))
-print("### added peaks ###")
-print(pd.DataFrame(dist2).describe(percentiles = perc))
-print("### max of all peaks###")
-print(pd.DataFrame(dist3).describe(percentiles = perc))
-print("### one peak by combining locations + adding signals ###")
-print(pd.DataFrame(dist4).describe(percentiles = perc))
-print("### 'average' signals ###")
-print(pd.DataFrame(dist5).describe(percentiles = perc))
-print("### baseline ###")
-print(pd.DataFrame(baseline).describe(percentiles = perc))
+#Saving results    
+    
+dists_df = pd.DataFrame({
+    "start_interval" : intervals["start_interval"], 
+    "reduced_signal" : reduced_signal_list,
+    "reduced_signal_dist" : reduced_signal_dist, 
+    "added_signal": added_signal_list,
+    "added_signal_dist": added_signal_dist,
+    "promoted_signal": promoted_signal_list,
+    "promoted_signal_dist" : promoted_signal_dist
+})
+
+print(dists_df.describe())
+
+signals_df = pd.DataFrame(total_signal_dicts)
+print(signals_df.describe())
+
+dists_df.to_csv("./data/distances_intervals.csv", sep="\t")
+signals_df.to_csv("./data/distances_signals.csv", sep="\t")
+
+                 
 
     
